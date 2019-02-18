@@ -54,8 +54,12 @@ func (a *Asg) IDTag() string {
 	return fmt.Sprintf("asg:%d", a.ID)
 }
 
+func validateAsgCounts(min int, desired int, max int) bool {
+	return (min <= desired && desired <= max)
+}
+
 func (m *Micropig) CreateAsg(opts *CreateAsgOptions) (*Asg, error) {
-	if opts.Min > opts.Desired || opts.Min > opts.Max || opts.Desired > opts.Max {
+	if !validateAsgCounts(opts.Min, opts.Desired, opts.Max) {
 		return nil, errors.New("required: Min <= Desired <= Max")
 	}
 
@@ -88,18 +92,42 @@ func (m *Micropig) CreateAsg(opts *CreateAsgOptions) (*Asg, error) {
 	return asg, nil
 }
 
-func (m *Micropig) DeleteAsgByName(name string) error {
+func (m *Micropig) SetAsgDesired(asg *Asg, desired int) error {
+	if !validateAsgCounts(asg.Min, desired, asg.Max) {
+		return errors.New("required: Min <= Desired <= Max")
+	}
+
+	asg.Desired = desired
+	m.Db.Save(asg)
+	return nil
+}
+
+func (m *Micropig) GetAsgByName(name string) (*Asg, error) {
 	var asg Asg
 	err := m.Db.First(&asg, "name = ?", name).Error
+	if err != nil {
+		return nil, err
+	}
+	return &asg, nil
+}
+
+func (m *Micropig) DeleteAsgByName(name string) error {
+	asg, err := m.GetAsgByName(name)
 	if err != nil {
 		return err
 	}
 
-	asg.Desired = 0
-	err = m.ScaleToDesired(&asg)
+	err = m.SetAsgDesired(asg, 0)
 	if err != nil {
 		return err
 	}
+
+	err = m.ScaleToDesired(asg)
+	if err != nil {
+		return err
+	}
+
+	m.WaitForAsgStatus(asg, "empty")
 
 	if !m.Db.NewRecord(asg) {
 		err = m.Db.Delete(asg).Error
@@ -215,7 +243,6 @@ func (m *Micropig) scaleDownSimple(asg *Asg) error {
 		dropID := asg.Droplets[i].ID
 		m.MustDeleteDroplet(dropID)
 	}
-	m.WaitForAsgStatus(asg, "empty")
 	return nil
 }
 
@@ -262,10 +289,10 @@ func (m *Micropig) updateAsgStatus(asg *Asg) error {
 	}
 
 	if currentSize == asg.Desired {
-		if allActive {
-			asg.Status = "ok"
-		} else if currentSize == 0 {
+		if currentSize == 0 {
 			asg.Status = "empty"
+		} else if allActive {
+			asg.Status = "ok"
 		} else {
 			asg.Status = "not_active"
 		}
@@ -287,22 +314,26 @@ func (m *Micropig) ListAsgs() ([]Asg, error) {
 		return nil, err
 	}
 
-	c := make(chan bool)
+	c := make(chan *Asg)
 	for _, asg := range asgs {
 		go func() {
 			m.updateAsg(&asg)
-			c <- true
+			c <- &asg
 		}()
 	}
 
+	updatedAsgs := make([]Asg, 0)
+
 	for i := 0; i < len(asgs); i++ {
 		select {
-		case <-c:
+		case asg := <-c:
+			updatedAsgs = append(updatedAsgs, *asg)
 		case <-time.After(30 * time.Second):
 			return nil, errors.New("timeout in ListAsgs")
 		}
 	}
-	return asgs, nil
+
+	return updatedAsgs, nil
 }
 
 //??????????????????????????????????????????????????????????????????????????????????????????

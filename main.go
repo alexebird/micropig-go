@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/alexebird/tableme/tableme"
 	"github.com/davecgh/go-spew/spew"
@@ -76,14 +75,15 @@ func cliAsgLsAction(c *cli.Context, m *Micropig) error {
 	for _, asg := range asgs {
 		records = append(records, []string{
 			asg.Name,
-			strconv.Itoa(asg.CurrentSize()),
+			asg.Status,
+			fmt.Sprintf("%d<%d/%d<%d", asg.Min, asg.CurrentSize(), asg.Desired, asg.Max),
 			asg.Region,
 			asg.Size,
 			asg.TagsStr,
 			asg.ImageSlug,
 		})
 	}
-	bites := tableme.TableMe([]string{"NAME", "CURR", "REGION", "SIZE", "TAGS", "IMAGE"}, records)
+	bites := tableme.TableMe([]string{"NAME", "STATUS", "COUNT", "REGION", "SIZE", "TAGS", "IMAGE"}, records)
 	buff := bytes.NewBuffer(bites)
 	fmt.Print(buff.String())
 
@@ -97,6 +97,28 @@ func cliAsgDeleteAction(c *cli.Context, m *Micropig) error {
 		return err
 	}
 	fmt.Println("removed asg name=" + name)
+	return nil
+}
+
+func cliAsgScaleAction(c *cli.Context, m *Micropig) error {
+	name := c.String("name")
+	desired := c.Int("desired")
+
+	asg, err := m.GetAsgByName(name)
+	if err != nil {
+		return err
+	}
+
+	err = m.SetAsgDesired(asg, desired)
+	if err != nil {
+		return err
+	}
+
+	err = m.ScaleToDesired(asg)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -182,6 +204,21 @@ func main() {
 							fmt.Println("DRY RUN!!!")
 						}
 						return cliAsgDeleteAction(c, m)
+					},
+				},
+				{
+					Name:  "scale",
+					Usage: "update desired size",
+					Flags: []cli.Flag{
+						cli.StringFlag{Name: "name, n"},
+						cli.IntFlag{Name: "desired"},
+					},
+					Action: func(c *cli.Context) error {
+						if c.GlobalBool("dry-run") {
+							m.DryRun = true
+							fmt.Println("DRY RUN!!!")
+						}
+						return cliAsgScaleAction(c, m)
 					},
 				},
 			},
