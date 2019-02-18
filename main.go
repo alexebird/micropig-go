@@ -1,12 +1,13 @@
 package main
 
 import (
-	//"bytes"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 
-	//"github.com/alexebird/tableme/tableme"
+	"github.com/alexebird/tableme/tableme"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/digitalocean/godo"
 	"github.com/jinzhu/gorm"
@@ -37,32 +38,69 @@ func cliAsgCreateAction(c *cli.Context, m *Micropig) error {
 	name := c.String("name")
 	fmt.Println("creating asg name=" + name)
 
-	asgOpts := &createAsgOptions{
-		name:     name,
-		region:   c.String("region"),
-		size:     c.String("size"),
-		snapshot: c.String("snapshot"),
-		desired:  c.Int("desired"),
-		min:      c.Int("min"),
-		max:      c.Int("max"),
+	asgOpts := &CreateAsgOptions{
+		Name:     name,
+		Region:   c.String("region"),
+		Size:     c.String("size"),
+		Snapshot: c.String("snapshot"),
+		Tags:     c.StringSlice("tags"),
+		Desired:  c.Int("desired"),
+		Min:      c.Int("min"),
+		Max:      c.Int("max"),
 	}
 
-	asg, err := m.createAsg(asgOpts)
+	asg, err := m.CreateAsg(asgOpts)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	fmt.Println("created asg name=" + asg.name)
-	//s(asg)
-	fmt.Println("waiting for asg name=" + asg.name)
-	m.waitForAsgStatus(asg, "ok")
-	fmt.Println("asg ok name=" + asg.name)
-	//s(asg)
+	m.ScaleToDesired(asg)
+	fmt.Println("created asg name=" + asg.Name)
+
+	if !m.DryRun && c.Bool("wait") {
+		fmt.Println("waiting for asg name=" + asg.Name)
+		m.WaitForAsgStatus(asg, "ok")
+	}
+	fmt.Println("asg ok name=" + asg.Name)
+
+	return nil
+}
+
+func cliAsgLsAction(c *cli.Context, m *Micropig) error {
+	asgs, err := m.ListAsgs()
+	if err != nil {
+		return err
+	}
+
+	var records [][]string
+	for _, asg := range asgs {
+		records = append(records, []string{
+			asg.Name,
+			strconv.Itoa(asg.CurrentSize()),
+			asg.Region,
+			asg.Size,
+			asg.TagsStr,
+			asg.ImageSlug,
+		})
+	}
+	bites := tableme.TableMe([]string{"NAME", "CURR", "REGION", "SIZE", "TAGS", "IMAGE"}, records)
+	buff := bytes.NewBuffer(bites)
+	fmt.Print(buff.String())
+
+	return nil
+}
+
+func cliAsgDeleteAction(c *cli.Context, m *Micropig) error {
+	name := c.String("name")
+	err := m.DeleteAsgByName(name)
+	if err != nil {
+		return err
+	}
+	fmt.Println("removed asg name=" + name)
 	return nil
 }
 
 func main() {
-	tokenSource := &TokenSource{AccessToken: os.Getenv("DIGITALOCEAN_TOKEN")}
 	ctx := context.TODO()
 	db, err := gorm.Open("postgres",
 		fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s",
@@ -71,6 +109,7 @@ func main() {
 	)
 	defer db.Close()
 
+	tokenSource := &TokenSource{AccessToken: os.Getenv("DIGITALOCEAN_TOKEN")}
 	m := &Micropig{
 		DryRun:   false,
 		Ctx:      ctx,
@@ -110,54 +149,41 @@ func main() {
 						cli.StringFlag{Name: "snapshot, i"},
 						cli.StringFlag{Name: "region, r"},
 						cli.StringFlag{Name: "size, s"},
-						cli.StringFlag{Name: "type, t"},
-						cli.BoolFlag{Name: "wait"},
+						cli.StringSliceFlag{Name: "tags, T"},
 						cli.IntFlag{Name: "max"},
 						cli.IntFlag{Name: "min"},
 						cli.IntFlag{Name: "desired"},
+						cli.BoolFlag{Name: "wait"},
 					},
-					Action: cliAsgCreateAction,
+					Action: func(c *cli.Context) error {
+						if c.GlobalBool("dry-run") {
+							m.DryRun = true
+							fmt.Println("DRY RUN!!!")
+						}
+						return cliAsgCreateAction(c, m)
+					},
 				},
-				//{
-				//Name:  "ls",
-				//Usage: "list asgs",
-				//Action: func(c *cli.Context) error {
-				//asgs, err := d.listAsgs()
-				//if err != nil {
-				//panic(err)
-				//}
-
-				//var records [][]string
-				//for _, asg := range asgs {
-				//records = append(records, []string{
-				//asg.name,
-				//strconv.Itoa(len(asg.droplets)),
-				//})
-				//}
-				//bites := tableme.TableMe([]string{"NAME", "CURR"}, records)
-				//buff := bytes.NewBuffer(bites)
-				//fmt.Print(buff.String())
-
-				////s(asgs)
-				//return nil
-				//},
-				//},
-				//{
-				//Name:  "rm",
-				//Usage: "rm asg",
-				//Flags: []cli.Flag{
-				//cli.StringFlag{Name: "name, n"},
-				//},
-				//Action: func(c *cli.Context) error {
-				//name := c.String("name")
-				//err := d.rmAsg(name)
-				//if err != nil {
-				//panic(err)
-				//}
-
-				//return nil
-				//},
-				//},
+				{
+					Name:  "ls",
+					Usage: "list asgs",
+					Action: func(c *cli.Context) error {
+						return cliAsgLsAction(c, m)
+					},
+				},
+				{
+					Name:  "rm",
+					Usage: "rm asg",
+					Flags: []cli.Flag{
+						cli.StringFlag{Name: "name, n"},
+					},
+					Action: func(c *cli.Context) error {
+						if c.GlobalBool("dry-run") {
+							m.DryRun = true
+							fmt.Println("DRY RUN!!!")
+						}
+						return cliAsgDeleteAction(c, m)
+					},
+				},
 			},
 		},
 	}

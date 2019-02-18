@@ -5,16 +5,19 @@ import (
 
 	//"github.com/alexebird/tableme/tableme"
 
+	"fmt"
+
 	"github.com/digitalocean/godo"
 	_ "github.com/jinzhu/gorm/dialects/postgres"
 )
 
-type createDropletOptions struct {
-	name    string
-	region  string
-	size    string
-	imageID int
-	tags    []string
+type CreateDropletOptions struct {
+	Name     string
+	Region   string
+	Size     string
+	ImageID  int
+	Tags     []string
+	UserData string
 }
 
 func sshKeyIDs() []godo.DropletCreateSSHKey {
@@ -24,21 +27,21 @@ func sshKeyIDs() []godo.DropletCreateSSHKey {
 	}
 }
 
-func (m *Micropig) mustCreateDroplet(opts *createDropletOptions) *godo.Droplet {
+func (m *Micropig) MustCreateDroplet(opts *CreateDropletOptions) *godo.Droplet {
 	createRequest := &godo.DropletCreateRequest{
-		Name:              opts.name,
-		Region:            opts.region,
-		Size:              opts.size,
-		Image:             godo.DropletCreateImage{ID: opts.imageID},
+		Name:              opts.Name,
+		Region:            opts.Region,
+		Size:              opts.Size,
+		Image:             godo.DropletCreateImage{ID: opts.ImageID},
 		SSHKeys:           sshKeyIDs(),
 		PrivateNetworking: true,
 		Monitoring:        true,
-		UserData:          "",
-		Tags:              opts.tags,
+		UserData:          opts.UserData,
+		Tags:              opts.Tags,
 	}
 
 	if m.DryRun {
-		s(createRequest)
+		fmt.Printf("[DRY] creating droplet %s\n", opts.Name)
 		return &godo.Droplet{}
 	} else {
 		drop, _, err := m.DoClient.Droplets.Create(m.Ctx, createRequest)
@@ -49,9 +52,9 @@ func (m *Micropig) mustCreateDroplet(opts *createDropletOptions) *godo.Droplet {
 	}
 }
 
-func (m *Micropig) mustDeleteDroplet(dropletID int) {
+func (m *Micropig) MustDeleteDroplet(dropletID int) {
 	if m.DryRun {
-		s(dropletID)
+		fmt.Printf("[DRY] deleting droplet %d\n", dropletID)
 	} else {
 		_, err := m.DoClient.Droplets.Delete(m.Ctx, dropletID)
 		if err != nil {

@@ -1,18 +1,13 @@
 package main
 
 import (
-	//"bytes"
-
 	"errors"
 	"strconv"
 
-	//"github.com/alexebird/tableme/tableme"
-
 	"github.com/digitalocean/godo"
-	_ "github.com/jinzhu/gorm/dialects/postgres"
 )
 
-func (m *Micropig) getSnapshotIdBySlug(slug string) (int, error) {
+func (m *Micropig) GetSnapshotIdBySlug(slug string) (int, error) {
 	listOpts := &godo.ListOptions{Page: 1, PerPage: 200}
 
 	snapshots, _, err := m.DoClient.Snapshots.ListDroplet(m.Ctx, listOpts)

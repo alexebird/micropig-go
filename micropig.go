@@ -1,14 +1,10 @@
 package main
 
 import (
-	//"bytes"
 	"context"
-
-	//"github.com/alexebird/tableme/tableme"
 
 	"github.com/digitalocean/godo"
 	"github.com/jinzhu/gorm"
-	_ "github.com/jinzhu/gorm/dialects/postgres"
 )
 
 type Micropig struct {
